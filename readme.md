@@ -43,9 +43,6 @@ Distributed HNSW indexes across sharded databases scale memory capacity horizont
   - Sharded database: Linear reduction in index build time proportional to shard count
 - Each shard executes DDL operations independently, achieving parallel execution across the database cluster
 
-### Use Case: Large-Scale Vector Search Benchmarks
-
-This loader was developed to support large-scale vector search benchmarks for datasets that cannot fit in single-instance memory. The Meta Sphere dataset (100K-900M records) serves as a standardized benchmark for evaluating vector database performance at scale.
 
 ## Architecture Overview
 
@@ -55,7 +52,7 @@ The loading strategy uses three standard distributed database techniques: (1) Gl
 
 Ensure the following infrastructure and configuration requirements are met before initiating the load.
 
-### Source Data Distribution
+### Source Data Staging
 
 The `sphere.jsonl` source file must exist on the local file system of every shard node.
 
@@ -74,7 +71,7 @@ The `sphere.jsonl` source file must exist on the local file system of every shar
 - **Recommendation**: Set Redo Log group size to a minimum of 4GB.
 - **Technical Context**: Small log files trigger frequent log switches. Each log switch forces a checkpoint, requiring the Database Writer (DBWR) to flush dirty blocks to disk. Frequent checkpoints interrupt the direct path load stream, degrading performance. Larger logs reduce switch frequency, allowing for sustained throughput.
 
-## Step 1: Global Schema Setup (Catalog)
+## Step 1: Schema Setup (Catalog)
 
 **Target**: Catalog Database  
 **User**: SYS (or user with SYSDBA/GSMADMIN_ROLE)
