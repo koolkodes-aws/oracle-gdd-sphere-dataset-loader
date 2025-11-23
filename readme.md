@@ -24,9 +24,9 @@ Vector datasets at the scale of Meta Sphere (900M+ records, ~200GB+ of dense emb
 - Query performance degrades significantly compared to in-memory HNSW due to physical I/O overhead
 - Query latency may exceed acceptable thresholds for latency-sensitive workloads
 
-### Oracle GDD Solution: Sharded In-Memory HNSW
+### Sharded In-Memory Vector Indexes
 
-Oracle Globally Distributed Database 23ai/26ai enables horizontal scaling for in-memory HNSW indexes:
+Distributed HNSW indexes across sharded databases scale memory capacity horizontally while maintaining query performance through parallel execution.
 
 **Scalability**:
 
