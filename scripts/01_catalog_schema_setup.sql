@@ -16,7 +16,7 @@ PROMPT =====================================================
 -- 1. Enable DDL propagation to all shards via Global Data Services
 ALTER SESSION ENABLE SHARD DDL;
 
--- 2. Create Global User
+-- 2. Create All-Shard User
 CREATE USER sphere_user IDENTIFIED BY "<secure_password>";
 
 GRANT CONNECT, RESOURCE, DBA TO sphere_user;

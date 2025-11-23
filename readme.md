@@ -1,8 +1,8 @@
 # Loading Sphere Dataset into Oracle Globally Distributed Database (26ai)
 
-This document details the procedure for ingesting the Meta Sphere dataset (JSONL format) into an Oracle Globally Distributed Database 26ai environment. The dataset consists of approximately 900 million records containing high-dimensional vector embeddings.
+The Meta Sphere dataset represents one of the largest publicly available corpora of web-scale text embeddings, containing approximately 900 million documents from Common Crawl with pre-computed 768-dimensional dense vector representations. Each document includes the original text, metadata, and a FLOAT32 vector embedding generated using the Sphere DPR (Dense Passage Retrieval) model. This dataset serves as a critical benchmark for evaluating vector search systems at scale, particularly for retrieval-augmented generation (RAG) and semantic search applications where query latency and accuracy must remain consistent across billions of vectors.
 
-The loading strategy employs external tables with `ORGANIZATION EXTERNAL` syntax, enabling file-based data ingestion on each shard. Parallel query operations on the external table combine with direct-path insert operations to optimize throughput while minimizing redo log contention during high-volume ingestion.
+This document details the procedure for ingesting the complete Sphere dataset into Oracle Globally Distributed Database 26ai. The loading strategy employs external tables, enabling file-based data ingestion on each shard. We combile parallel query on the external table with direct-path insert operations to optimize throughput while minimizing redo log contention during high-volume ingestion.
 
 ## Why Oracle Globally Distributed Database for Large Vector Datasets?
 
@@ -12,7 +12,7 @@ For large-scale vector search deployments with datasets exceeding 500 million re
 
 **Memory Constraints**:
 
-- In-memory HNSW vector indexes (`ORGANIZATION NEIGHBOR GRAPH`) deliver significantly faster performance compared to disk-based IVF indexes (`ORGANIZATION INMEMORY NEIGHBOR GRAPH`)
+- In-memory HNSW vector indexes deliver significantly faster performance compared to disk-based IVF indexes
 - HNSW indexes utilize the Vector Memory Pool, a dedicated memory area within the System Global Area (SGA)
 - Single database instance memory is bounded by physical hardware constraints
 - Large vector datasets (500M+ vectors with high dimensionality) can exceed single-instance Vector Memory Pool capacity
@@ -59,7 +59,7 @@ The database schema is defined centrally on the Catalog Database. The GDD infras
 
 ### Data Locality via Direct-Path INSERT
 
-Source data files reside on local storage attached to each shard node, eliminating network transfer overhead. Each shard's Pluggable Database (PDB) accesses data through external tables with `ORGANIZATION EXTERNAL` syntax. The INSERT operation uses the `APPEND` hint to perform direct-path inserts, writing formatted blocks directly to data files and bypassing the Database Buffer Cache. This minimizes logical I/O, reduces CPU consumption, and eliminates buffer cache contention.
+Source data files reside on local storage attached to each shard node, eliminating network transfer overhead. Each shard's Pluggable Database (PDB) accesses data through external tables. The INSERT operation uses the `APPEND` hint to perform direct-path inserts, writing formatted blocks directly to data files and bypassing the Database Buffer Cache. This minimizes logical I/O, reduces CPU consumption, and eliminates buffer cache contention.
 
 ### Chunk-Aware Data Filtering
 
