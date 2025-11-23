@@ -1,12 +1,12 @@
 # Loading Sphere Dataset into Oracle Globally Distributed Database (26ai)
 
-The Meta Sphere dataset represents one of the largest publicly available corpora of web-scale text embeddings, containing approximately 900 million documents from Common Crawl with pre-computed 768-dimensional dense vector representations. Each document includes the original text, metadata, and a FLOAT32 vector embedding generated using the Sphere DPR (Dense Passage Retrieval) model. This dataset serves as a critical benchmark for evaluating vector search systems at scale, particularly for retrieval-augmented generation (RAG) and semantic search applications where query latency and accuracy must remain consistent across billions of vectors.
+The Meta Sphere dataset represents one of the largest publicly available corpus of web-scale text embeddings, containing approximately 900 million documents from Common Crawl with pre-computed 768-dimensional dense vector representations. Each document includes the original text, metadata, and a FLOAT32 vector embedding generated using the Sphere DPR (Dense Passage Retrieval) model. This dataset serves as a critical benchmark for evaluating vector search systems at scale, particularly for retrieval-augmented generation (RAG) and semantic search applications where query latency and accuracy must remain consistent across billions of vectors.
 
 This document details the procedure for ingesting the complete Sphere dataset into Oracle Globally Distributed Database 26ai. The loading strategy employs external tables, enabling file-based data ingestion on each shard. We combile parallel query on the external table with direct-path insert operations to optimize throughput while minimizing redo log contention during high-volume ingestion.
 
-## Why Oracle Globally Distributed Database for Large Vector Datasets?
+## Why Distributed Databases for Large Vector Datasets?
 
-For large-scale vector search deployments with datasets exceeding 500 million records, Oracle Globally Distributed Database (GDD) provides a unique advantage by enabling **horizontally scaled, in-memory HNSW vector indexes** across multiple database shards.
+Vector datasets at the scale of Meta Sphere (900M+ records, ~200GB+ of dense embeddings) exceed the memory capacity constraints of single-node database systems. Distributed database architectures address this limitation through horizontal partitioning, distributing data across multiple nodes where each node maintains a subset of the total dataset in its local memory. Oracle Globally Distributed Database implements shared-nothing architecture with Consistent Hash partitioning, enabling in-memory HNSW vector indexes to span multiple shards. This approach scales aggregate memory capacity linearly with node count while maintaining query performance through parallel execution and data locality.
 
 ### The Physics of Large Vector Indexes
 
@@ -49,25 +49,7 @@ This loader was developed to support large-scale vector search benchmarks for da
 
 ## Architecture Overview
 
-In a distributed database environment, centralized loading patterns—where a single client pushes data through a coordinator node—often result in network saturation and serialization bottlenecks. To optimize ingestion performance for large datasets, this procedure decentralizes the loading process.
-
-The architecture relies on three core mechanisms:
-
-### Global Schema Propagation
-
-The database schema is defined centrally on the Catalog Database. The GDD infrastructure utilizes the Global Data Services (GDS) framework to asynchronously propagate DDL statements (tables, users, privileges) to all shard nodes. This ensures schema consistency across the topology without requiring manual DDL execution on individual nodes.
-
-### Data Locality via Direct-Path INSERT
-
-Source data files reside on local storage attached to each shard node, eliminating network transfer overhead. Each shard's Pluggable Database (PDB) accesses data through external tables. The INSERT operation uses the `APPEND` hint to perform direct-path inserts, writing formatted blocks directly to data files and bypassing the Database Buffer Cache. This minimizes logical I/O, reduces CPU consumption, and eliminates buffer cache contention.
-
-### Chunk-Aware Data Filtering
-
-The source file `sphere.jsonl` is replicated identically across all shard nodes. Without filtering, loading the complete file on each shard would cause ORA-02502 (REMOTE MAPPING ERROR) due to sharding key violations. The load operation uses the `SHARD_CHUNK_ID` function in the WHERE predicate to implement chunk-aware filtering.
-
-- **Hash Computation**: The function computes the chunk identifier by hashing the sharding key value for each row.
-- **Chunk Ownership**: Returns NULL if the computed chunk is not owned by the local shard, causing the row to be filtered from the result set.
-- **Optimization**: Filtered rows are discarded during query execution without generating redo records or triggering constraint violations.
+The loading strategy uses three standard distributed database techniques: (1) Global Data Services (GDS) propagates schema DDL from the catalog to all shards, (2) source files reside on local storage at each shard node, accessed via external tables, and (3) the `SHARD_CHUNK_ID` function filters rows during query execution, ensuring each shard processes only data matching its assigned hash range. Direct-path INSERT with the `APPEND` hint bypasses the Database Buffer Cache to optimize throughput.
 
 ## Prerequisites
 
