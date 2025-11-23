@@ -1,8 +1,8 @@
 # Loading Sphere Dataset into Oracle Globally Distributed Database (26ai)
 
-This document details the procedure for ingesting the Meta Sphere dataset (JSONL format) into an Oracle Globally Distributed Database (GDD) 26ai environment. The dataset consists of approximately 900 million records containing high-dimensional vector embeddings.
+This document details the procedure for ingesting the Meta Sphere dataset (JSONL format) into an Oracle Globally Distributed Database 26ai environment. The dataset consists of approximately 900 million records containing high-dimensional vector embeddings.
 
-The loading strategy employs Sharded External Tables mapped to local file systems on individual shards, combined with a Hybrid Parallel Load approach. This architecture optimizes I/O throughput and mitigates contention in the database redo log buffer during high-volume ingestion.
+The loading strategy employs external tables with `ORGANIZATION EXTERNAL` syntax, enabling file-based data ingestion on each shard. Parallel query operations on the external table combine with direct-path insert operations to optimize throughput while minimizing redo log contention during high-volume ingestion.
 
 ## Why Oracle Globally Distributed Database for Large Vector Datasets?
 
@@ -12,17 +12,17 @@ For large-scale vector search deployments with datasets exceeding 500 million re
 
 **Memory Constraints**:
 
-- In-memory HNSW indexes deliver significantly faster performance compared to disk-based IVF indexes
-- HNSW indexes require residence in the Vector Pool within the SGA
-- Single database instance memory is finite
-- Large vector datasets (500M+ vectors with high dimensions) can exceed single-instance memory capacity
+- In-memory HNSW vector indexes (`ORGANIZATION NEIGHBOR GRAPH`) deliver significantly faster performance compared to disk-based IVF indexes (`ORGANIZATION INMEMORY NEIGHBOR GRAPH`)
+- HNSW indexes utilize the Vector Memory Pool, a dedicated memory area within the System Global Area (SGA)
+- Single database instance memory is bounded by physical hardware constraints
+- Large vector datasets (500M+ vectors with high dimensionality) can exceed single-instance Vector Memory Pool capacity
 
 **Disk-Based Limitations**:
 
-- IVF indexes can handle many TB of data (limited only by disk space)
-- Cost-effective as disk storage is inexpensive
-- Performance penalty: significantly slower than in-memory HNSW
-- May not meet requirements for latency-sensitive production workloads
+- IVF vector indexes support datasets limited only by available tablespace storage
+- Storage costs are lower compared to memory requirements
+- Query performance degrades significantly compared to in-memory HNSW due to physical I/O overhead
+- Query latency may exceed acceptable thresholds for latency-sensitive workloads
 
 ### Oracle GDD Solution: Sharded In-Memory HNSW
 
@@ -30,18 +30,18 @@ Oracle Globally Distributed Database 23ai/26ai enables horizontal scaling for in
 
 **Scalability**:
 
-- Supports up to 1,000 shards in a single logical database
-- Each shard contains approximately 1/n of the total dataset
-- Linear scaling: more shards = larger supportable HNSW index size
-- Tested with large-scale vector datasets across multiple shards
+- Oracle Globally Distributed Database supports up to 1,000 shards per sharded database configuration
+- Data distribution uses Consistent Hash partitioning, ensuring approximately 1/n of dataset rows per shard
+- Horizontal scaling increases aggregate Vector Memory Pool capacity linearly with shard count
+- Production deployments demonstrate scalability with multi-shard vector index configurations
 
 **Performance Benefits**:
 
-- **Query Latency**: Sub-second similarity search at scale
-- **Index Creation**: Parallel HNSW build across shards dramatically reduces creation time
-  - Single-instance: Hours for large datasets
-  - Multi-shard: Significant reduction with linear speedup based on shard count
-- Each shard processes 1/n of the data independently, enabling true parallelism
+- **Query Latency**: Sub-second vector similarity search at scale
+- **Index Build Time**: Parallel DDL execution across shards reduces index creation time
+  - Single-instance: Hours for large-scale datasets
+  - Sharded database: Linear reduction in index build time proportional to shard count
+- Each shard executes DDL operations independently, achieving parallel execution across the database cluster
 
 ### Use Case: Large-Scale Vector Search Benchmarks
 
@@ -57,17 +57,17 @@ The architecture relies on three core mechanisms:
 
 The database schema is defined centrally on the Catalog Database. The GDD infrastructure utilizes the Global Data Services (GDS) framework to asynchronously propagate DDL statements (tables, users, privileges) to all shard nodes. This ensures schema consistency across the topology without requiring manual DDL execution on individual nodes.
 
-### Data Locality via Direct Path Load
+### Data Locality via Direct-Path INSERT
 
-Rather than transmitting data across the network, source data is staged locally on each shard's file system. Each Shard Pluggable Database (PDB) utilizes a local External Table configuration that references the local sphere.jsonl file. This configuration enables the database engine to execute a "Direct Path Load" (`INSERT /*+ APPEND */`), which writes data blocks directly to data files, bypassing the System Global Area (SGA) buffer cache. This approach significantly reduces CPU overhead and memory contention.
+Source data files reside on local storage attached to each shard node, eliminating network transfer overhead. Each shard's Pluggable Database (PDB) accesses data through external tables with `ORGANIZATION EXTERNAL` syntax. The INSERT operation uses the `APPEND` hint to perform direct-path inserts, writing formatted blocks directly to data files and bypassing the Database Buffer Cache. This minimizes logical I/O, reduces CPU consumption, and eliminates buffer cache contention.
 
-### Shard-Pruned Ingestion
+### Chunk-Aware Data Filtering
 
-The source file `sphere.jsonl` is identical on every shard and contains the complete dataset. Loading the full file on every node would result in redundant processing and "Shard Miss" errors (ORA-02502). To filter data efficiently, the load scripts implement the `SHARD_CHUNK_ID` function within the WHERE clause.
+The source file `sphere.jsonl` is replicated identically across all shard nodes. Without filtering, loading the complete file on each shard would cause ORA-02502 (REMOTE MAPPING ERROR) due to sharding key violations. The load operation uses the `SHARD_CHUNK_ID` function in the WHERE predicate to implement chunk-aware filtering.
 
-- **Mechanism**: The function computes the sharding key hash for each row at runtime.
-- **Logic**: It verifies if the computed chunk ID maps to the local shard processing the row.
-- **Result**: The database inserts only the rows owned by the local shard and discards non-local rows without generating redo entries or error logs for the skipped data.
+- **Hash Computation**: The function computes the chunk identifier by hashing the sharding key value for each row.
+- **Chunk Ownership**: Returns NULL if the computed chunk is not owned by the local shard, causing the row to be filtered from the result set.
+- **Optimization**: Filtered rows are discarded during query execution without generating redo records or triggering constraint violations.
 
 ## Prerequisites
 
@@ -131,69 +131,71 @@ sqlplus sphere_user/<password>@<shard_host>:<port>/<pdb_service_name> @02_shard_
 
 **Note**: Update the `local_data_path` variable in the SQL file if the source file location differs from `/sphere`.
 
-## Step 3: Hybrid Parallel Load (All Shards)
+## Step 3: Data Load Execution (All Shards)
 
 **Target**: Each Shard PDB  
 **User**: sphere_user  
 **Method**: Background Execution (nohup)
 
-This step executes the data ingestion using a Hybrid Load Strategy that differentiates the parallelism degree between the Producer (Read) and Consumer (Write) operations.
+This step executes data ingestion using parallel query on the external table combined with serial direct-path insert.
 
-**Hybrid Strategy Mechanics**:
+**Parallelism Configuration**:
 
-### Parallel Read (Producer)
+### Parallel Query on External Table
 
-The SELECT statement utilizes `/*+ PARALLEL(t, 16) */`. This instantiates 16 parallel query slave processes to read the JSONL file, parse the JSON structure, and convert text arrays into binary VECTOR format. This phase is CPU-intensive and benefits from high concurrency.
+The SELECT statement uses the `PARALLEL` hint to instantiate parallel query server processes. These processes read the external file, parse JSON structures using `JSON_TABLE`, and materialize VECTOR objects from array literals. Parallel query reduces elapsed time for CPU-intensive JSON parsing and vector deserialization operations.
 
-### Serial Write (Consumer)
+### Serial Direct-Path INSERT
 
-Parallel DML is intentionally disabled for the INSERT operation.
+Parallel DML is not enabled for the INSERT operation.
 
-- **Rationale**: Enabling parallel writers for high-volume loads with Primary Key constraints often creates contention on the Redo Log Buffer latches. If multiple writers attempt to write to the redo log buffer simultaneously, the `log buffer space` wait event can throttle the entire system.
-- **Outcome**: The 16 reader threads funnel processed data to a single writer process. This acts as a flow control mechanism, maintaining high throughput while keeping redo generation within the capacity limits of the Log Writer (LGWR) process.
+- **Redo Log Considerations**: Parallel DML with unique constraints (Primary Key) can cause contention on redo allocation latches and redo copy latches, particularly when multiple parallel execution servers attempt simultaneous writes to the redo log buffer. The `log buffer space` wait event may become prevalent under high concurrency.
+- **Implementation**: The parallel query servers pass rows through the query coordinator to a single direct-path INSERT operation. This serializes redo generation, maintaining throughput within Log Writer (LGWR) capacity while leveraging parallelism for the read and transformation phases.
 
 **Execution**:  
-Execute continuously in the background on every shard server.
+Execute in background on each shard server.
 
 ```bash
-nohup sqlplus sphere_user/<password>@<shard_host>:<port>/<pdb_service_name> @03_hybrid_load_script.sql > load_shard_$(date +%Y%m%d).log 2>&1 &
+nohup sqlplus sphere_user/<password>@<shard_host>:<port>/<pdb_service_name> @03_data_load_script.sql > load_shard_$(date +%Y%m%d).log 2>&1 &
 ```
 
 ## Monitoring
 
-Verify load progress by inspecting database performance views.
+Monitor load operations using dynamic performance views.
 
-### Active Session Check
+### Parallel Execution Server Status
 
-Verify the presence of the coordinator and parallel slave processes.
-
-```sql
-SELECT status, count(*) FROM v$px_session WHERE username = 'SPHERE_USER' GROUP BY status;
-```
-
-### Progress Estimation
-
-Query `V$SESSION_LONGOPS` to view the full table scan progress and estimated completion time.
+Query `V$PX_SESSION` to verify active parallel execution servers and coordinator processes.
 
 ```sql
-SELECT OPNAME, TARGET, SOFAR, TOTALWORK, UNITS, TIME_REMAINING
-FROM V$SESSION_LONGOPS
-WHERE TIME_REMAINING > 0;
+SELECT sid, serial#, qcsid, degree, req_degree, server_group, server_set
+FROM v$px_session 
+WHERE qcsid = (SELECT sid FROM v$session WHERE username = 'SPHERE_USER');
 ```
 
-## Step 4: Post-Load Vector Indexing (Catalog)
+### Long Operations Monitoring
+
+Query `V$SESSION_LONGOPS` to track full table scan progress and estimate completion time.
+
+```sql
+SELECT opname, target, sofar, totalwork, units, time_remaining, elapsed_seconds
+FROM v$session_longops
+WHERE time_remaining > 0 AND username = 'SPHERE_USER';
+```
+
+## Step 4: Post-Load Vector Index Creation (Catalog)
 
 **Target**: Catalog Database  
 **User**: sphere_user
 
-Vector Index creation involves building a Hierarchical Navigable Small World (HNSW) graph, which is computationally expensive. Building this index during the initial data load results in significant index fragmentation and overhead. The optimal approach is to defer index creation until the dataset is fully populated.
+Vector index creation constructs an in-memory Hierarchical Navigable Small World (HNSW) graph structure. Building vector indexes during concurrent DML operations causes index fragmentation and increased maintenance overhead. Best practice defers index creation until bulk loading completes.
 
-**Indexing Configuration**:
+**Index Configuration**:
 
-- **Algorithm**: Creates an `ORGANIZATION NEIGHBOR GRAPH` index using the HNSW algorithm.
-- **Distance Metric**: Configures `DISTANCE METRIC COSINE` for semantic similarity calculations.
-- **Parallelism**: Uses `PARALLEL 32` to leverage available CPU cores on each shard, accelerating the in-memory graph construction.
-- **Propagation**: Executing the DDL on the Catalog propagates the command to all shards, triggering parallel local index builds.
+- **Organization**: `ORGANIZATION NEIGHBOR GRAPH` specifies in-memory HNSW vector index type.
+- **Distance Function**: `DISTANCE COSINE` configures the similarity metric for vector comparisons.
+- **Parallel DDL**: The `PARALLEL` clause enables parallel index build operations on each shard, utilizing available CPU resources.
+- **DDL Propagation**: Executing `CREATE VECTOR INDEX` on the catalog database with `ENABLE SHARD DDL` propagates the DDL statement to all shards via Global Data Services (GDS), triggering parallel index builds across the sharded database.
 
 **Execution**:  
 Execute only after Step 3 has successfully completed on all shards.
@@ -210,15 +212,15 @@ WITH TARGET ACCURACY 90
 PARALLEL 32;
 ```
 
-## Appendix A: Loading on Autonomous Database (ADB)
+## Appendix A: Oracle Autonomous Database Deployment
 
-For Oracle Autonomous Database (Serverless or Dedicated) deployments, direct access to the local operating system file system is restricted. Data ingestion must utilize Object Storage.
+Oracle Autonomous Database (Serverless and Dedicated) deployments do not provide direct file system access. Data loading uses Object Storage integration via the `DBMS_CLOUD` package.
 
-### 1. Functional Differences
+### Functional Differences
 
-- **Data Source**: OCI Object Storage (or S3/Azure Blob) replaces the local file system.
-- **Interface**: `DBMS_CLOUD` package replaces standard `ORGANIZATION EXTERNAL` syntax.
-- **Authentication**: Requires cloud credentials (API Key or Resource Principal).
+- **Data Source**: OCI Object Storage, Amazon S3, or Azure Blob Storage replaces local file system access.
+- **API**: `DBMS_CLOUD.CREATE_EXTERNAL_TABLE` procedure replaces DDL-based `ORGANIZATION EXTERNAL` syntax.
+- **Authentication**: Cloud credentials (Auth Token, Resource Principal, or API Key) required for Object Storage access.
 
 ### Setup Procedure
 
@@ -228,7 +230,7 @@ Upload the `sphere.jsonl` file to an OCI Object Storage bucket within the target
 
 #### B. Credential Configuration
 
-For OCI-native deployments, utilize the Resource Principal (`OCI$RESOURCE_PRINCIPAL`) to avoid managing static API keys. If using a private bucket without Resource Principals, create a credential object:
+Oracle Autonomous Database on OCI supports Resource Principal authentication, eliminating credential management. For private buckets or cross-tenant access, create credential objects using `DBMS_CLOUD.CREATE_CREDENTIAL`:
 
 ```sql
 BEGIN
@@ -243,9 +245,9 @@ END;
 /
 ```
 
-#### C. External Table Definition
+#### C. External Table Creation via DBMS_CLOUD
 
-Replace Step 2 with the following `DBMS_CLOUD` configuration. This maps the object storage URI to the external table definition.
+Replace Step 2 with `DBMS_CLOUD.CREATE_EXTERNAL_TABLE` procedure. This creates an external table definition referencing Object Storage URIs.
 
 ```sql
 BEGIN
@@ -266,7 +268,7 @@ END;
 
 #### D. Load Execution
 
-Proceed with Step 3 (Hybrid Load Script). The script logic remains unchanged; `DBMS_CLOUD` manages the parallel data stream from Object Storage to the database engine.
+Proceed with Step 3 using the same SQL script. The `DBMS_CLOUD` package handles parallel reads from Object Storage, with the access driver managing streaming data transfer to the database instance.
 
 ## References
 

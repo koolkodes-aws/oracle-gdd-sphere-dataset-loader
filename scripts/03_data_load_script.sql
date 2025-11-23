@@ -2,28 +2,28 @@
 -- 03_data_load_script.sql
 -- TARGET: EACH Shard PDB
 -- USER: sphere_user
--- STRATEGY: Hybrid Load (Parallel Read / Serial Write)
--- =====================================================
+-- STRATEGY: Parallel Query with Serial Direct-Path INSERT
+-- =====================================================  
 
 SET TIMING ON
 SET ECHO ON
 
 -- ==================================================
--- SESSION OPTIMIZATIONS
+-- SESSION CONFIGURATION
 -- ==================================================
 
--- 1. Memory Optimization for JSON Parsing
+-- 1. Work Area Memory Management
 ALTER SESSION SET WORKAREA_SIZE_POLICY=AUTO;
-ALTER SESSION SET SORT_AREA_SIZE=1073741824; -- 1GB Sort Area
+ALTER SESSION SET SORT_AREA_SIZE=1073741824; -- 1GB sort area for JSON operations
 
--- 2. Redo Log Optimization
--- "Batch, Nowait" allows the loader to proceed without waiting for physical disk sync
+-- 2. Commit Optimization
+-- BATCH mode reduces log file sync waits by deferring physical write confirmation
 ALTER SESSION SET COMMIT_WRITE = 'BATCH, NOWAIT';
 ALTER SESSION SET COMMIT_LOGGING = 'BATCH';
 
--- 3. Parallelism Strategy
--- We DO NOT enable PARALLEL DML on the insert side to protect the Redo Log Buffer.
--- We ONLY use parallel query on the select side.
+-- 3. Parallel Execution Configuration
+-- Parallel DML is NOT enabled to avoid redo allocation latch contention.
+-- Only parallel query is used on the external table SELECT operation.
 
 -- ==================================================
 -- LOAD EXECUTION
@@ -40,7 +40,7 @@ INSERT /*+ APPEND */ INTO sphere_documents (
     vector,
     created_date
 )
-SELECT /*+ PARALLEL(t, 16) */ -- 16 threads to parse JSON and convert Vectors
+SELECT /*+ PARALLEL(t, 16) */ -- Parallel query servers for JSON parsing and vector deserialization
     jt.id,
     jt.url,
     jt.title,
@@ -62,10 +62,10 @@ FROM
     ) jt
 WHERE
     t.json_doc IS NOT NULL
-    -- CRITICAL FOR GDD: SHARD PRUNING
-    -- This function returns the Chunk ID for the given sharding key (id).
-    -- If the Chunk ID is not mapped to this local shard, the function returns NULL (or filters out).
-    -- This ensures this shard ONLY inserts rows it owns.
+    -- Chunk-aware filtering for sharded tables
+    -- SHARD_CHUNK_ID computes chunk ownership based on sharding key hash
+    -- Returns NULL for chunks not owned by this shard, filtering rows from result set
+    -- Prevents ORA-02502 (REMOTE MAPPING ERROR) during INSERT operations
     AND SHARD_CHUNK_ID('SPHERE_USER.SPHERE_DOCUMENTS', jt.id) IS NOT NULL;
 
 COMMIT;

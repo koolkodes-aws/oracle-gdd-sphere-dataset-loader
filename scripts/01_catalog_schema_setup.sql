@@ -2,7 +2,7 @@
 -- 01_catalog_schema_setup.sql
 -- TARGET: Catalog Database
 -- USER: SYSDBA
--- PURPOSE: Create Global Schema for Oracle GDD 26ai
+-- PURPOSE: Define global schema for sharded database
 -- =====================================================
 
 SET ECHO ON
@@ -10,10 +10,10 @@ SET SERVEROUTPUT ON
 SET TIMING ON
 
 PROMPT =====================================================
-PROMPT Creating Sphere Dataset Schema (Catalog)
+PROMPT Creating Sharded Database Schema (Catalog)
 PROMPT =====================================================
 
--- 1. Enable Shard DDL propagation
+-- 1. Enable DDL propagation to all shards via Global Data Services
 ALTER SESSION ENABLE SHARD DDL;
 
 -- 2. Create Global User
@@ -28,8 +28,9 @@ GRANT SELECT_CATALOG_ROLE TO sphere_user; -- Helpful for GDD monitoring
 -- 3. Create Tablespace Set (Automatically created on all shards)
 CREATE TABLESPACE SET sphere_ts1;
 
--- 4. Create Sharded Table with VECTOR Data Type
--- Partitioned by Consistent Hash for even distribution
+-- 4. Create Sharded Table with VECTOR Column
+-- PARTITION BY CONSISTENT HASH distributes rows across shards based on hash of sharding key
+-- PARTITIONS AUTO allows Oracle to determine partition count based on shard topology
 CREATE SHARDED TABLE sphere_user.sphere_documents (
     id           VARCHAR2(100) NOT NULL,
     url          VARCHAR2(4000),
@@ -45,8 +46,9 @@ PARTITION BY CONSISTENT HASH (id)
 PARTITIONS AUTO
 TABLESPACE SET sphere_ts1;
 
--- 5. Create Metadata Table (Sharded by Reference)
--- Co-locates metadata with the parent document on the same shard
+-- 5. Create Reference-Partitioned Sharded Table
+-- PARTITION BY REFERENCE co-locates child rows with parent rows on the same shard
+-- Ensures metadata and document rows reside on same shard, eliminating cross-shard joins
 CREATE SHARDED TABLE sphere_user.sphere_load_metadata (
     batch_id       NUMBER NOT NULL,
     doc_id         VARCHAR2(100) NOT NULL,

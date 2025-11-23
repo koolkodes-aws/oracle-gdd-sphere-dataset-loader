@@ -1,24 +1,25 @@
 -- =====================================================
 -- 02_shard_external_table_setup.sql
--- TARGET: EACH Shard PDB (Run locally)
+-- TARGET: EACH Shard PDB (Execute on each shard individually)
 -- USER: sphere_user
--- PURPOSE: Map local JSONL file to External Table
+-- PURPOSE: Create external table for local JSONL file access
 -- =====================================================
 
 -- !!! CONFIGURATION !!!
--- Update this path to the actual mount point on the shard
+-- Update this path to match the actual file system mount point on each shard
 DEFINE local_data_path = '/sphere'
 
 SET ECHO ON
 SET SERVEROUTPUT ON
 
 PROMPT =====================================================
-PROMPT Configuring Local External Table
+PROMPT Creating External Table Definition
 PROMPT Path: &local_data_path
 PROMPT =====================================================
 
--- 1. Disable Shard DDL 
--- Critical: We are creating a LOCAL object specific to this shard's filesystem
+-- 1. Disable Shard DDL Propagation
+-- This DDL creates a local object with host-specific file system paths
+-- Must not be propagated via Global Data Services to other shards
 ALTER SESSION DISABLE SHARD DDL;
 
 -- 2. Create Local Directory
@@ -32,8 +33,9 @@ EXCEPTION
 END;
 /
 
--- 4. Create Local External Table
--- Maps the JSONL file to a single CLOB column for processing
+-- 4. Create External Table with ORGANIZATION EXTERNAL
+-- Each row in the external file is mapped to a single CLOB column
+-- ORACLE_LOADER access driver reads newline-delimited records
 CREATE TABLE SPHERE900M_EXT (
     json_doc CLOB
 )
@@ -43,7 +45,7 @@ ORGANIZATION EXTERNAL (
     ACCESS PARAMETERS (
         RECORDS DELIMITED BY NEWLINE 
         FIELDS (
-            json_doc CHAR(2000000) -- 2MB Buffer for large lines
+            json_doc CHAR(2000000) -- 2MB field buffer for large JSON lines
         )
     )
     LOCATION ('sphere.jsonl')
