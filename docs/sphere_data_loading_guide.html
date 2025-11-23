@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sphere GDD Load Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 
+    Chosen Palette: Neutral Blue 
+    Application Structure Plan: Designed a single-page dashboard with sticky side-navigation for major sections (Overview, Prerequisites, Loading Process, Code Viewer, References). This structure is superior to the linear README as it allows quick, non-linear access to specific steps and code. The main interactive component is a "Code Viewer" that loads SQL scripts into a <pre> block on demand, centralizing all technical artifacts for easy consumption. 
+    Visualization & Content Choices: 1) Report Info: Architecture text -> Goal: Organize -> Viz/Method: HTML/CSS Diagram -> Interaction: Static -> Justification: Visually clarifies the Catalog-to-Shard data flow. 2) Report Info: SQL files (01, 02, 03) & Index SQL -> Goal: Explore/Inform -> Viz/Method: Interactive JS Code Viewer (Buttons + <pre> block) -> Interaction: Click buttons to load corresponding SQL into viewer -> Justification: Transforms static file references into an interactive tool, vastly improving usability for a developer. 
+    CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. 
+    -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .sticky-nav {
+            position: sticky;
+            top: 2rem;
+            align-self: start;
+        }
+        .nav-link {
+            @apply block w-full text-left px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900;
+        }
+        .nav-link-active {
+            @apply bg-blue-50 text-blue-700 font-semibold;
+        }
+        /* Simple syntax highlighting for SQL keywords */
+        .sql-keyword { color: #4f46e5; font-weight: 500; }
+        .sql-comment { color: #059669; }
+        .sql-string { color: #db2777; }
+        .sql-type { color: #0ea5e9; }
+        .sql-function { color: #d97706; }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        
+        <header class="mb-10">
+            <h1 class="text-4xl font-bold tracking-tight text-gray-900">Sphere Dataset Loading Guide</h1>
+            <p class="mt-2 text-xl text-gray-600">Oracle Globally Distributed Database (26ai)</p>
+        </header>
+
+        <div class="flex flex-col lg:flex-row gap-8 lg:gap-12">
+            
+            <!-- Side Navigation -->
+            <nav class="lg:w-1/4 sticky-nav">
+                <ul class="space-y-1" id="nav-menu">
+                    <li><a href="#overview" class="nav-link nav-link-active">Overview</a></li>
+                    <li><a href="#prerequisites" class="nav-link">Prerequisites</a></li>
+                    <li><a href="#loading-process" class="nav-link">Loading Process</a></li>
+                    <li><a href="#code-viewer" class="nav-link">Code Viewer</a></li>
+                    <li><a href="#references" class="nav-link">References</a></li>
+                </ul>
+            </nav>
+
+            <!-- Main Content -->
+            <main class="lg:w-3/4 space-y-12">
+
+                <!-- Overview Section -->
+                <section id="overview" class="scroll-mt-20">
+                    <h2 class="text-2xl font-semibold text-gray-900 border-b pb-2">Overview</h2>
+                    <p class="mt-4 text-lg text-gray-700">
+                        This guide outlines the procedure to load the Sphere dataset (JSONL format) into an Oracle Globally Distributed Database (GDD) 26ai environment. The process utilizes **Sharded External Tables** mapped to local files on each shard and a **Hybrid Parallel Load** strategy to maximize throughput.
+                    </p>
+
+                    <h3 class="text-xl font-semibold text-gray-900 mt-6 mb-4">Architecture Overview</h3>
+                    <p class="mb-6 text-gray-700">In an Oracle GDD architecture, data loading is most efficient when performed locally on each shard ("Direct Path Load"). The process follows this data flow:</p>
+                    
+                    <!-- Architecture Diagram -->
+                    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <div class="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0 md:space-x-4">
+                            
+                            <!-- Catalog -->
+                            <div class="w-full md:w-1/3 text-center p-4 border-2 border-blue-500 rounded-lg bg-blue-50 shadow-md">
+                                <h4 class="font-bold text-blue-800 text-lg">1. Catalog Database</h4>
+                                <p class="text-sm text-blue-700">Global Schema (DDL) is defined once.</p>
+                            </div>
+
+                            <!-- Arrow -->
+                            <div class="text-blue-500 text-4xl font-bold transform rotate-90 md:rotate-0">
+                                &darr;
+                            </div>
+
+                            <!-- Shards -->
+                            <div class="w-full md:w-2/3">
+                                <p class="text-center font-medium text-gray-700 mb-2">Propagates to all Shards</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="p-4 border border-gray-300 rounded-lg bg-gray-50 text-center">
+                                        <h5 class="font-semibold text-gray-800">Shard 1</h5>
+                                        <p class="text-sm text-gray-600 mt-1">Local `sphere.jsonl` is mapped.</p>
+                                        <p class="text-sm text-green-600 font-medium mt-2">Load Script Runs Locally</p>
+                                    </div>
+                                    <div class="p-4 border border-gray-300 rounded-lg bg-gray-50 text-center">
+                                        <h5 class="font-semibold text-gray-800">Shard 2</h5>
+                                        <p class="text-sm text-gray-600 mt-1">Local `sphere.jsonl` is mapped.</p>
+                                        <p class="text-sm text-green-600 font-medium mt-2">Load Script Runs Locally</p>
+                                    </div>
+                                    <div class="p-4 border border-gray-300 rounded-lg bg-gray-50 text-center">
+                                        <h5 class="font-semibold text-gray-800">Shard N...</h5>
+                                        <p class="text-sm text-gray-600 mt-1">Local `sphere.jsonl` is mapped.</p>
+                                        <p class="text-sm text-green-600 font-medium mt-2">Load Script Runs Locally</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-6 text-center">
+                            <h4 class="text-lg font-semibold text-gray-900">3. Shard-Pruned Loading</h4>
+                            <p class="text-gray-700 mt-1">Each load script uses `SHARD_CHUNK_ID` to filter and insert **only** the rows that belong to that specific shard, discarding the rest.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Prerequisites Section -->
+                <section id="prerequisites" class="scroll-mt-20">
+                    <h2 class="text-2xl font-semibold text-gray-900 border-b pb-2">Prerequisites</h2>
+                    <ul class="mt-4 space-y-3">
+                        <li class="flex items-start">
+                            <span class="text-green-500 text-2xl mr-3">&check;</span>
+                            <div>
+                                <h4 class="font-medium text-gray-900">Source Data</h4>
+                                <p class="text-gray-700">The `sphere.jsonl` file must be present on the file system of **every shard node**. (Recommended: `/sphere/sphere.jsonl`)</p>
+                            </div>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 text-2xl mr-3">&check;</span>
+                            <div>
+                                <h4 class="font-medium text-gray-900">Storage</h4>
+                                <p class="text-gray-700">Ensure `sphere_ts1` tablespace storage is adequate on all shards.</p>
+                            </div>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 text-2xl mr-3">&check;</span>
+                            <div>
+                                <h4 class="font-medium text-gray-900">System Configuration</h4>
+                                <p class="text-gray-700">Redo Logs: Min **4GB** per group (Critical for performance).</p>
+                                <p class="text-gray-700">Recovery Area: Increase `db_recovery_file_dest_size` to handle load volume (e.g., 2TB).</p>
+                            </div>
+                        </li>
+                    </ul>
+                </section>
+
+                <!-- Loading Process Section -->
+                <section id="loading-process" class="scroll-mt-20">
+                    <h2 class="text-2xl font-semibold text-gray-900 border-b pb-2">Loading Process</h2>
+                    
+                    <div class="mt-4 space-y-8">
+                        <!-- Step 1 -->
+                        <div class="p-6 bg-white rounded-lg shadow-sm border border-gray-200">
+                            <span class="inline-block bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full mb-2">Step 1</span>
+                            <h3 class="text-xl font-semibold text-gray-900">Global Schema Setup (Catalog)</h3>
+                            <p class="mt-2 text-gray-700">Run this script **once** on the Catalog database as SYSDBA. It creates the global `sphere_user`, the sharded `sphere_documents` table, and propagates the DDL to all shards.</p>
+                            <p class="mt-3 font-medium text-gray-800">Script: <code class="text-sm bg-gray-100 px-2 py-1 rounded">01_catalog_schema_setup.sql</code></p>
+                            <pre class="mt-2 bg-gray-800 text-gray-300 text-sm p-3 rounded-md overflow-x-auto"><code>sqlplus sys/&lt;password&gt;@&lt;catalog_host&gt;:&lt;port&gt;/&lt;service_name&gt; as sysdba @01_catalog_schema_setup.sql</code></pre>
+                        </div>
+                        
+                        <!-- Step 2 -->
+                        <div class="p-6 bg-white rounded-lg shadow-sm border border-gray-200">
+                            <span class="inline-block bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full mb-2">Step 2</span>
+                            <h3 class="text-xl font-semibold text-gray-900">Local External Table Setup (All Shards)</h3>
+                            <p class="mt-2 text-gray-700">Connect to **each Shard PDB individually** as `sphere_user`. This script disables Shard DDL to create a *local* directory and external table pointing to the `sphere.jsonl` file on that specific shard's file system.</p>
+                            <p class="mt-3 font-medium text-gray-800">Script: <code class="text-sm bg-gray-100 px-2 py-1 rounded">02_shard_external_table_setup.sql</code></p>
+                            <pre class="mt-2 bg-gray-800 text-gray-300 text-sm p-3 rounded-md overflow-x-auto"><code>sqlplus sphere_user/&lt;password&gt;@&lt;shard_host&gt;:&lt;port&gt;/&lt;pdb_service_name&gt; @02_shard_external_table_setup.sql</code></pre>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="p-6 bg-white rounded-lg shadow-sm border border-gray-200">
+                            <span class="inline-block bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full mb-2">Step 3</span>
+                            <h3 class="text-xl font-semibold text-gray-900">Hybrid Parallel Load (All Shards)</h3>
+                            <p class="mt-2 text-gray-700">Execute this load script as `sphere_user` on **every shard server**, preferably in the background using `nohup`. This script uses a **Hybrid Load Strategy** (Parallel Read / Serial Write) to prevent "Log Buffer Space" contention.</p>
+                            <p class="mt-3 font-medium text-gray-800">Script: <code class="text-sm bg-gray-100 px-2 py-1 rounded">03_hybrid_load_script.sql</code></p>
+                            <pre class="mt-2 bg-gray-800 text-gray-300 text-sm p-3 rounded-md overflow-x-auto"><code>nohup sqlplus sphere_user/&lt;password&gt;@&lt;shard_host&gt;:&lt;port&gt;/&lt;pdb_service_name&gt; @03_hybrid_load_script.sql &gt; load_shard_$(date +%Y%m%d).log 2>&1 &</code></pre>
+                            
+                            <h4 class="font-medium text-gray-900 mt-4">Monitoring</h4>
+                            <p class="text-gray-700">Check the log file or query active sessions:</p>
+                            <pre class="mt-2 bg-gray-800 text-gray-300 text-sm p-3 rounded-md overflow-x-auto"><code>SELECT status, count(*) FROM v$px_session WHERE username = 'SPHERE_USER' GROUP BY status;</code></pre>
+                        </div>
+
+                        <!-- Step 4 -->
+                        <div class="p-6 bg-white rounded-lg shadow-sm border border-gray-200">
+                            <span class="inline-block bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full mb-2">Step 4</span>
+                            <h3 class="text-xl font-semibold text-gray-900">Post-Load Vector Indexing (Catalog)</h3>
+                            <p class="mt-2 text-gray-700">**After** the load completes on all shards, connect to the **Catalog** as `sphere_user` to create the Vector Index. This DDL will propagate to all shards, and the index will be built locally in parallel.</p>
+                            <p class="mt-3 font-medium text-gray-800">Script: <code class="text-sm bg-gray-100 px-2 py-1 rounded">Post-Load Indexing (SQL)</code></p>
+                            <pre class="mt-2 bg-gray-800 text-gray-300 text-sm p-3 rounded-md overflow-x-auto"><code>-- Connect to Catalog
+ALTER SESSION ENABLE SHARD DDL;
+ALTER SESSION ENABLE PARALLEL DDL;
+
+CREATE VECTOR INDEX sphere_doc_vector_idx ON sphere_documents(vector)
+ORGANIZATION NEIGHBOR GRAPH
+DISTANCE METRIC COSINE
+WITH TARGET ACCURACY 90
+PARALLEL 32;</code></pre>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Code Viewer Section -->
+                <section id="code-viewer" class="scroll-mt-20">
+                    <h2 class="text-2xl font-semibold text-gray-900 border-b pb-2">Interactive Code Viewer</h2>
+                    <p class="mt-4 text-gray-700">
+                        Use the buttons below to view the contents of the SQL scripts used in the loading process.
+                    </p>
+                    
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <button class="code-viewer-btn active-btn" data-script="catalog">01_catalog_schema_setup.sql</button>
+                        <button class="code-viewer-btn" data-script="shard">02_shard_external_table_setup.sql</button>
+                        <button class="code-viewer-btn" data-script="load">03_hybrid_load_script.sql</button>
+                        <button class="code-viewer-btn" data-script="index">Post-Load Index (Step 4)</button>
+                    </div>
+
+                    <div class="mt-4 bg-gray-900 rounded-lg shadow-lg border border-gray-700 overflow-hidden">
+                        <div class="bg-gray-800 px-4 py-2 border-b border-gray-700">
+                            <span id="code-title" class="text-sm font-medium text-yellow-300"></span>
+                        </div>
+                        <pre id="code-display" class="p-4 text-sm text-gray-100 overflow-auto" style="max-height: 600px;"></pre>
+                    </div>
+                </section>
+
+                <!-- References Section -->
+                <section id="references" class="scroll-mt-20">
+                    <h2 class="text-2xl font-semibold text-gray-900 border-b pb-2">References</h2>
+                    <ul class="mt-4 space-y-2 list-disc list-inside text-blue-600">
+                        <li>
+                            <a href="https://github.com/facebookresearch/Sphere" target="_blank" rel="noopener noreferrer" class="hover:underline hover:text-blue-800">Meta Sphere Dataset: Official GitHub Repository (Facebook Research)</a>
+                        </li>
+                        <li>
+                            <a href="https://ai.meta.com/blog/introducing-sphere-meta-ais-web-scale-corpus-for-better-knowledge-intensive-nlp/" target="_blank" rel="noopener noreferrer" class="hover:underline hover:text-blue-800">Introducing Sphere: Meta AI's web-scale corpus</a>
+                        </li>
+                        <li>
+                            <a href="https://docs.oracle.com/en/database/oracle/oracle-database/26/shard/" target="_blank" rel="noopener noreferrer" class="hover:underline hover:text-blue-800">Oracle Globally Distributed Database Guide (26ai)</a>
+                        </li>
+                        <li>
+                            <a href="https://docs.oracle.com/en/database/oracle/oracle-database/26/" target="_blank" rel="noopener noreferrer" class="hover:underline hover:text-blue-800">Oracle AI Database 26ai Documentation Library</a>
+                        </li>
+                    </ul>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        // --- SQL Content Store ---
+        const sqlScripts = {
+            catalog: {
+                title: "01_catalog_schema_setup.sql",
+                content: `
+-- =====================================================
+-- 01_catalog_schema_setup.sql
+-- TARGET: Catalog Database
+-- USER: SYSDBA
+-- PURPOSE: Create Global Schema for Oracle GDD 26ai
+-- =====================================================
+
+<span class="sql-keyword">SET</span> ECHO ON
+<span class="sql-keyword">SET</span> SERVEROUTPUT ON
+<span class="sql-keyword">SET</span> TIMING ON
+
+<span class="sql-keyword">PROMPT</span> =====================================================
+<span class="sql-keyword">PROMPT</span> Creating Sphere Dataset Schema (Catalog)
+<span class="sql-keyword">PROMPT</span> =====================================================
+
+<span class="sql-comment">-- 1. Enable Shard DDL propagation</span>
+<span class="sql-keyword">ALTER SESSION ENABLE SHARD DDL</span>;
+
+<span class="sql-comment">-- 2. Create Global User</span>
+<span class="sql-keyword">CREATE USER</span> sphere_user <span class="sql-keyword">IDENTIFIED BY</span> <span class="sql-string">"&lt;secure_password&gt;"</span>;
+
+<span class="sql-keyword">GRANT</span> CONNECT, RESOURCE, DBA <span class="sql-keyword">TO</span> sphere_user;
+<span class="sql-keyword">GRANT</span> <span class="sql-keyword">CREATE TABLE</span>, <span class="sql-keyword">CREATE VIEW</span>, <span class="sql-keyword">CREATE SEQUENCE</span> <span class="sql-keyword">TO</span> sphere_user;
+<span class="sql-keyword">GRANT UNLIMITED TABLESPACE TO</span> sphere_user;
+<span class="sql-keyword">GRANT CREATE ANY DIRECTORY TO</span> sphere_user;
+<span class="sql-keyword">GRANT</span> SELECT_CATALOG_ROLE <span class="sql-keyword">TO</span> sphere_user; <span class="sql-comment">-- Helpful for GDD monitoring</span>
+
+<span class="sql-comment">-- 3. Create Tablespace Set (Automatically created on all shards)</span>
+<span class="sql-keyword">CREATE TABLESPACE SET</span> sphere_ts1;
+
+<span class="sql-comment">-- 4. Create Sharded Table with VECTOR Data Type</span>
+<span class="sql-comment">-- Partitioned by Consistent Hash for even distribution</span>
+<span class="sql-keyword">CREATE SHARDED TABLE</span> sphere_user.sphere_documents (
+    id           <span class="sql-type">VARCHAR2</span>(100) <span class="sql-keyword">NOT NULL</span>,
+    url          <span class="sql-type">VARCHAR2</span>(4000),
+    title        <span class="sql-type">VARCHAR2</span>(1000),
+    sha          <span class="sql-type">VARCHAR2</span>(100),
+    raw_text     <span class="sql-type">CLOB</span>,
+    vector       <span class="sql-type">VECTOR</span>(768, <span class="sql-type">FLOAT32</span>),
+    created_date <span class="sql-type">TIMESTAMP</span> <span class="sql-keyword">DEFAULT</span> <span class="sql-function">SYSTIMESTAMP</span>,
+    updated_date <span class="sql-type">TIMESTAMP</span> <span class="sql-keyword">DEFAULT</span> <span class="sql-function">SYSTIMESTAMP</span>,
+    <span class="sql-keyword">CONSTRAINT</span> sphere_documents_pk <span class="sql-keyword">PRIMARY KEY</span> (id)
+)
+<span class="sql-keyword">PARTITION BY CONSISTENT HASH</span> (id)
+<span class="sql-keyword">PARTITIONS</span> AUTO
+<span class="sql-keyword">TABLESPACE SET</span> sphere_ts1;
+
+<span class="sql-comment">-- 5. Create Metadata Table (Sharded by Reference)</span>
+<span class="sql-comment">-- Co-locates metadata with the parent document on the same shard</span>
+<span class="sql-keyword">CREATE SHARDED TABLE</span> sphere_user.sphere_load_metadata (
+    batch_id       <span class="sql-type">NUMBER</span> <span class="sql-keyword">NOT NULL</span>,
+    doc_id         <span class="sql-type">VARCHAR2</span>(100) <span class="sql-keyword">NOT NULL</span>,
+    load_date      <span class="sql-type">TIMESTAMP</span> <span class="sql-keyword">DEFAULT</span> <span class="sql-function">SYSTIMESTAMP</span>,
+    records_loaded <span class="sql-type">NUMBER</span>,
+    load_status    <span class="sql-type">VARCHAR2</span>(50),
+    error_message  <span class="sql-type">CLOB</span>,
+    shard_name     <span class="sql-type">VARCHAR2</span>(100),
+    <span class="sql-keyword">CONSTRAINT</span> sphere_load_meta_pk <span class="sql-keyword">PRIMARY KEY</span> (doc_id, batch_id),
+    <span class="sql-keyword">CONSTRAINT</span> sphere_load_meta_fk <span class="sql-keyword">FOREIGN KEY</span> (doc_id) 
+        <span class="sql-keyword">REFERENCES</span> sphere_user.sphere_documents(id)
+)
+<span class="sql-keyword">PARTITION BY REFERENCE</span> (sphere_load_meta_fk)
+<span class="sql-keyword">TABLESPACE SET</span> sphere_ts1;
+
+<span class="sql-keyword">COMMIT</span>;
+
+<span class="sql-keyword">PROMPT</span> Global Schema Creation Complete.
+<span class="sql-keyword">EXIT</span>;
+`
+            },
+            shard: {
+                title: "02_shard_external_table_setup.sql",
+                content: `
+-- =====================================================
+-- 02_shard_external_table_setup.sql
+-- TARGET: EACH Shard PDB (Run locally)
+-- USER: sphere_user
+-- PURPOSE: Map local JSONL file to External Table
+-- =====================================================
+
+<span class="sql-comment">-- !!! CONFIGURATION !!!</span>
+<span class="sql-comment">-- Update this path to the actual mount point on the shard</span>
+<span class="sql-keyword">DEFINE</span> local_data_path = <span class="sql-string">'/sphere'</span>
+
+<span class="sql-keyword">SET</span> ECHO ON
+<span class="sql-keyword">SET</span> SERVEROUTPUT ON
+
+<span class="sql-keyword">PROMPT</span> =====================================================
+<span class="sql-keyword">PROMPT</span> Configuring Local External Table
+<span class="sql-keyword">PROMPT</span> Path: &local_data_path
+<span class="sql-keyword">PROMPT</span> =====================================================
+
+<span class="sql-comment">-- 1. Disable Shard DDL </span>
+<span class="sql-comment">-- Critical: We are creating a LOCAL object specific to this shard's filesystem</span>
+<span class="sql-keyword">ALTER SESSION DISABLE SHARD DDL</span>;
+
+<span class="sql-comment">-- 2. Create Local Directory</span>
+<span class="sql-keyword">CREATE OR REPLACE DIRECTORY</span> sphere_data_dir <span class="sql-keyword">AS</span> <span class="sql-string">'&local_data_path'</span>;
+
+<span class="sql-comment">-- 3. Clean up existing external table (if any)</span>
+<span class="sql-keyword">BEGIN</span>
+    <span class="sql-keyword">EXECUTE IMMEDIATE</span> <span class="sql-string">'DROP TABLE SPHERE900M_EXT'</span>;
+<span class="sql-keyword">EXCEPTION</span>
+    <span class="sql-keyword">WHEN</span> OTHERS <span class="sql-keyword">THEN</span> <span class="sql-keyword">NULL</span>;
+<span class="sql-keyword">END</span>;
+/
+
+<span class="sql-comment">-- 4. Create Local External Table</span>
+<span class="sql-comment">-- Maps the JSONL file to a single CLOB column for processing</span>
+<span class="sql-keyword">CREATE TABLE</span> SPHERE900M_EXT (
+    json_doc <span class="sql-type">CLOB</span>
+)
+<span class="sql-keyword">ORGANIZATION EXTERNAL</span> (
+    <span class="sql-keyword">TYPE</span> ORACLE_LOADER
+    <span class="sql-keyword">DEFAULT DIRECTORY</span> sphere_data_dir
+    <span class="sql-keyword">ACCESS PARAMETERS</span> (
+        <span class="sql-keyword">RECORDS DELIMITED BY NEWLINE</span> 
+        <span class="sql-keyword">FIELDS</span> (
+            json_doc <span class="sql-type">CHAR</span>(2000000) <span class="sql-comment">-- 2MB Buffer for large lines</span>
+        )
+    )
+    <span class="sql-keyword">LOCATION</span> (<span class="sql-string">'sphere.jsonl'</span>)
+)
+<span class="sql-keyword">REJECT LIMIT UNLIMITED</span>;
+
+<span class="sql-keyword">PROMPT</span> Local External Table SPHERE900M_EXT created successfully.
+<span class="sql-keyword">EXIT</span>;
+`
+            },
+            load: {
+                title: "03_hybrid_load_script.sql",
+                content: `
+-- =====================================================
+-- 03_hybrid_load_script.sql
+-- TARGET: EACH Shard PDB
+-- USER: sphere_user
+-- STRATEGY: Hybrid Load (Parallel Read / Serial Write)
+-- =====================================================
+
+<span class="sql-keyword">SET</span> TIMING ON
+<span class="sql-keyword">SET</span> ECHO ON
+
+<span class="sql-comment">-- ==================================================</span>
+<span class="sql-comment">-- SESSION OPTIMIZATIONS</span>
+<span class="sql-comment">-- ==================================================</span>
+
+<span class="sql-comment">-- 1. Memory Optimization for JSON Parsing</span>
+<span class="sql-keyword">ALTER SESSION SET</span> WORKAREA_SIZE_POLICY=AUTO;
+<span class="sql-keyword">ALTER SESSION SET</span> SORT_AREA_SIZE=1073741824; <span class="sql-comment">-- 1GB Sort Area</span>
+
+<span class="sql-comment">-- 2. Redo Log Optimization</span>
+<span class="sql-comment">-- "Batch, Nowait" allows the loader to proceed without waiting for physical disk sync</span>
+<span class="sql-keyword">ALTER SESSION SET</span> COMMIT_WRITE = <span class="sql-string">'BATCH, NOWAIT'</span>;
+<span class="sql-keyword">ALTER SESSION SET</span> COMMIT_LOGGING = <span class="sql-string">'BATCH'</span>;
+
+<span class="sql-comment">-- 3. Parallelism Strategy</span>
+<span class="sql-comment">-- We DO NOT enable PARALLEL DML on the insert side to protect the Redo Log Buffer.</span>
+<span class="sql-comment">-- We ONLY use parallel query on the select side.</span>
+
+<span class="sql-comment">-- ==================================================</span>
+<span class="sql-comment">-- LOAD EXECUTION</span>
+<span class="sql-comment">-- ==================================================</span>
+
+<span class="sql-keyword">PROMPT</span> Starting Data Load...
+
+<span class="sql-keyword">INSERT</span> <span class="sql-comment">/*+ APPEND */</span> <span class="sql-keyword">INTO</span> sphere_documents (
+    id,
+    url,
+    title,
+    sha,
+    raw_text,
+    vector,
+    created_date
+)
+<span class="sql-keyword">SELECT</span> <span class="sql-comment">/*+ PARALLEL(t, 16) */</span> <span class="sql-comment">-- 16 threads to parse JSON and convert Vectors</span>
+    jt.id,
+    jt.url,
+    jt.title,
+    jt.sha,
+    jt.raw_text,
+    <span class="sql-function">TO_VECTOR</span>(jt.vector_json),
+    <span class="sql-function">SYSTIMESTAMP</span>
+<span class="sql-keyword">FROM</span>
+    SPHERE900M_EXT t,
+    <span class="sql-function">JSON_TABLE</span>(t.json_doc, <span class="sql-string">'$'</span>
+        <span class="sql-keyword">COLUMNS</span> (
+            id          <span class="sql-type">VARCHAR2</span>(100)       <span class="sql-keyword">PATH</span> <span class="sql-string">'$.id'</span>,
+            url         <span class="sql-type">VARCHAR2</span>(4000)      <span class="sql-keyword">PATH</span> <span class="sql-string">'$.url'</span>,
+            title       <span class="sql-type">VARCHAR2</span>(1000)      <span class="sql-keyword">PATH</span> <span class="sql-string">'$.title'</span>,
+            sha         <span class="sql-type">VARCHAR2</span>(100)       <span class="sql-keyword">PATH</span> <span class="sql-string">'$.sha'</span>,
+            raw_text    <span class="sql-type">CLOB</span>                <span class="sql-keyword">PATH</span> <span class="sql-string">'$.raw'</span>,
+            vector_json <span class="sql-type">CLOB</span> <span class="sql-keyword">FORMAT</span> JSON    <span class="sql-keyword">PATH</span> <span class="sql-string">'$.vector'</span>
+        )
+    ) jt
+<span class="sql-keyword">WHERE</span>
+    t.json_doc <span class="sql-keyword">IS NOT NULL</span>
+    <span class="sql-comment">-- CRITICAL FOR GDD: SHARD PRUNING</span>
+    <span class="sql-comment">-- This ensures this shard ONLY inserts rows it owns.</span>
+    <span class="sql-keyword">AND</span> <span class="sql-function">SHARD_CHUNK_ID</span>(<span class="sql-string">'SPHERE_USER.SPHERE_DOCUMENTS'</span>, jt.id) <span class="sql-keyword">IS NOT NULL</span>;
+
+<span class="sql-keyword">COMMIT</span>;
+
+<span class="sql-keyword">PROMPT</span> Load Complete.
+<span class="sql-keyword">EXIT</span>;
+`
+            },
+            index: {
+                title: "Post-Load Index (Step 4)",
+                content: `
+<span class="sql-comment">-- =====================================================</span>
+<span class="sql-comment">-- Step 4: Post-Load Vector Indexing</span>
+<span class="sql-comment">-- TARGET: Catalog Database</span>
+<span class="sql-comment">-- USER: sphere_user</span>
+<span class="sql-comment">-- =====================================================</span>
+
+<span class="sql-comment">-- Connect to Catalog</span>
+<span class="sql-keyword">ALTER SESSION ENABLE SHARD DDL</span>;
+<span class="sql-keyword">ALTER SESSION ENABLE PARALLEL DDL</span>;
+
+<span class="sql-keyword">CREATE VECTOR INDEX</span> sphere_doc_vector_idx <span class="sql-keyword">ON</span> sphere_documents(vector)
+<span class="sql-keyword">ORGANIZATION NEIGHBOR GRAPH</span>
+<span class="sql-keyword">DISTANCE METRIC COSINE</span>
+<span class="sql-keyword">WITH TARGET ACCURACY</span> 90
+<span class="sql-keyword">PARALLEL</span> 32;
+`
+            }
+        };
+
+        // --- Code Viewer Logic ---
+        const codeViewer = document.getElementById('code-viewer');
+        const codeDisplay = document.getElementById('code-display');
+        const codeTitle = document.getElementById('code-title');
+        const buttons = codeViewer.querySelectorAll('.code-viewer-btn');
+
+        function setCode(scriptKey) {
+            if (sqlScripts[scriptKey]) {
+                codeTitle.textContent = sqlScripts[scriptKey].title;
+                codeDisplay.innerHTML = sqlScripts[scriptKey].content.trim();
+                
+                buttons.forEach(btn => {
+                    btn.classList.remove('active-btn');
+                    if (btn.dataset.script === scriptKey) {
+                        btn.classList.add('active-btn');
+                    }
+                });
+            }
+        }
+
+        buttons.forEach(button => {
+            button.addEventListener('click', () => {
+                setCode(button.dataset.script);
+            });
+        });
+
+        // --- Styling for Code Viewer Buttons ---
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .code-viewer-btn {
+                @apply px-4 py-2 text-sm font-medium text-gray-700 bg-white rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+            }
+            .code-viewer-btn.active-btn {
+                @apply bg-blue-600 text-white border-blue-600 hover:bg-blue-700;
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // --- Active Nav Link Scrolling ---
+        const navMenu = document.getElementById('nav-menu');
+        const navLinks = navMenu.querySelectorAll('a');
+        const sections = document.querySelectorAll('section');
+
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.3 
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    navLinks.forEach(link => {
+                        link.classList.remove('nav-link-active');
+                        if (link.getAttribute('href') === `#${entry.target.id}`) {
+                            link.classList.add('nav-link-active');
+                        }
+                    });
+                }
+            });
+        }, observerOptions);
+
+        sections.forEach(section => {
+            observer.observe(section);
+        });
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                navLinks.forEach(l => l.classList.remove('nav-link-active'));
+                e.target.classList.add('nav-link-active');
+            });
+        });
+
+        // --- Initial Load ---
+        setCode('catalog'); // Load catalog script by default
+    
+    </script>
+</body>
+</html>
