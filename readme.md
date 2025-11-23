@@ -4,6 +4,49 @@ This document details the procedure for ingesting the Meta Sphere dataset (JSONL
 
 The loading strategy employs Sharded External Tables mapped to local file systems on individual shards, combined with a Hybrid Parallel Load approach. This architecture optimizes I/O throughput and mitigates contention in the database redo log buffer during high-volume ingestion.
 
+## Why Oracle Globally Distributed Database for Large Vector Datasets?
+
+For large-scale vector search deployments with datasets exceeding 500 million records, Oracle Globally Distributed Database (GDD) provides a unique advantage by enabling **horizontally scaled, in-memory HNSW vector indexes** across multiple database shards.
+
+### The Physics of Large Vector Indexes
+
+**Memory Constraints**:
+
+- In-memory HNSW indexes deliver significantly faster performance compared to disk-based IVF indexes
+- HNSW indexes require residence in the Vector Pool within the SGA
+- Single database instance memory is finite
+- Large vector datasets (500M+ vectors with high dimensions) can exceed single-instance memory capacity
+
+**Disk-Based Limitations**:
+
+- IVF indexes can handle many TB of data (limited only by disk space)
+- Cost-effective as disk storage is inexpensive
+- Performance penalty: significantly slower than in-memory HNSW
+- May not meet requirements for latency-sensitive production workloads
+
+### Oracle GDD Solution: Sharded In-Memory HNSW
+
+Oracle Globally Distributed Database 23ai/26ai enables horizontal scaling for in-memory HNSW indexes:
+
+**Scalability**:
+
+- Supports up to 1,000 shards in a single logical database
+- Each shard contains approximately 1/n of the total dataset
+- Linear scaling: more shards = larger supportable HNSW index size
+- Tested with large-scale vector datasets across multiple shards
+
+**Performance Benefits**:
+
+- **Query Latency**: Sub-second similarity search at scale
+- **Index Creation**: Parallel HNSW build across shards dramatically reduces creation time
+  - Single-instance: Hours for large datasets
+  - Multi-shard: Significant reduction with linear speedup based on shard count
+- Each shard processes 1/n of the data independently, enabling true parallelism
+
+### Use Case: Large-Scale Vector Search Benchmarks
+
+This loader was developed to support large-scale vector search benchmarks for datasets that cannot fit in single-instance memory. The Meta Sphere dataset (100K-900M records) serves as a standardized benchmark for evaluating vector database performance at scale.
+
 ## Architecture Overview
 
 In a distributed database environment, centralized loading patterns—where a single client pushes data through a coordinator node—often result in network saturation and serialization bottlenecks. To optimize ingestion performance for large datasets, this procedure decentralizes the loading process.
